@@ -456,3 +456,41 @@ select{
     max-height:120px;
     overflow:auto;
 }
+
+.ai-chat-prominent .chat-msg{
+    margin:8px 0;
+    padding:10px 14px;
+    border-radius:8px;
+    font-size:13px;
+    line-height:1.6;
+    max-width:95%;
+    word-wrap:break-word;
+}
+
+.ai-chat-prominent .chat-msg.bot{
+    background:#16213e;
+    color:#ddd;
+    border:1px solid #2a2a4a;
+}
+
+.ai-chat-prominent .chat-msg.user{
+    background:#533483;
+    color:white;
+    margin-left:auto;
+    text-align:right;
+}
+
+.ai-chat-prominent .chat-msg code{
+    background:#111827;
+    color:#7fdbca;
+    padding:2px 6px;
+    border-radius:4px;
+    font-family:Consolas,monospace;
+    font-size:12px;
+}
+
+.ai-chat-prominent .chat-msg br{
+    display:block;
+    content:"";
+    margin:4px 0;
+}
