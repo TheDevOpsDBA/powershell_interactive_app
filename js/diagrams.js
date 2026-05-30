@@ -672,5 +672,8 @@ const sectionDiagramTypes = {
     "m11s2": "email-reports",
     "m11s3": "backup-reports",
     "m12s1": "migration-plan",
-    "m12s2": "instance-migration"
+    "m12s2": "instance-migration",
+    "m13s1": "generic",
+    "m13s2": "generic",
+    "m13s3": "generic"
 };

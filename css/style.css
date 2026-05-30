@@ -494,3 +494,50 @@ select{
     content:"";
     margin:4px 0;
 }
+
+.header-links{
+    position:absolute;
+    right:18px;
+    display:flex;
+    gap:10px;
+    align-items:center;
+}
+
+.promo-link{
+    background:linear-gradient(135deg,#e94560,#533483);
+    color:white;
+    padding:6px 12px;
+    border-radius:6px;
+    font-size:11px;
+    text-decoration:none;
+    font-weight:bold;
+    white-space:nowrap;
+}
+
+.promo-link:hover{
+    opacity:0.9;
+}
+
+
+.header-links{
+    position:absolute;
+    right:18px;
+    display:flex;
+    gap:10px;
+    align-items:center;
+}
+
+.promo-link{
+    background:linear-gradient(135deg,#e94560,#533483);
+    color:white;
+    padding:6px 12px;
+    border-radius:6px;
+    font-size:11px;
+    text-decoration:none;
+    font-weight:bold;
+    white-space:nowrap;
+}
+
+.promo-link:hover{
+    opacity:0.9;
+}
