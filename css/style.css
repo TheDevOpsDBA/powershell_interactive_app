@@ -541,3 +541,171 @@ select{
 .promo-link:hover{
     opacity:0.9;
 }
+
+@media(max-width:768px){
+    header{
+        padding:10px 12px;
+        flex-wrap:wrap;
+        gap:8px;
+    }
+
+    header h1{
+        font-size:14px;
+        width:100%;
+        text-align:center;
+        order:2;
+    }
+
+    .logo-link{
+        position:static;
+        order:1;
+    }
+
+    .header-logo{
+        height:35px;
+    }
+
+    .header-links{
+        position:static;
+        order:3;
+        width:100%;
+        justify-content:center;
+        flex-wrap:wrap;
+        gap:6px;
+    }
+
+    .promo-link{
+        font-size:10px;
+        padding:5px 8px;
+    }
+
+    .toolbar{
+        flex-wrap:wrap;
+        padding:8px;
+        gap:6px;
+    }
+
+    .toolbar select{
+        flex:1;
+        min-width:0;
+        font-size:12px;
+        padding:8px 6px;
+    }
+
+    .toolbar button{
+        font-size:12px;
+        padding:8px 10px;
+    }
+
+    .layout{
+        grid-template-columns:1fr;
+        padding:8px;
+        gap:8px;
+    }
+
+    .left-panel, .right-panel{
+        padding:10px;
+    }
+
+    .section-heading{
+        font-size:15px;
+    }
+
+    .diagram-box svg{
+        height:140px;
+    }
+
+    .expand-btn{
+        font-size:12px;
+        padding:6px 10px;
+    }
+
+    .reveal-controls{
+        margin-top:6px;
+    }
+
+    .reveal-btn{
+        font-size:11px;
+        padding:6px 10px;
+    }
+
+    #description{
+        font-size:13px;
+        line-height:1.6;
+    }
+
+    #description li{
+        font-size:12px;
+    }
+
+    #syntax{
+        font-size:11px;
+        padding:8px;
+    }
+
+    #exampleTabs{
+        gap:5px;
+    }
+
+    .example-btn{
+        font-size:11px;
+        padding:6px 10px;
+    }
+
+    .CodeMirror{
+        height:250px;
+        font-size:12px;
+    }
+
+    .action-row button{
+        font-size:12px;
+        padding:8px 10px;
+    }
+
+    .ai-chat-prominent{
+        margin-top:8px;
+    }
+
+    .ai-chat-header{
+        font-size:13px;
+        padding:10px 12px;
+    }
+
+    .ai-chat-disclaimer{
+        font-size:9px;
+        padding:5px 12px;
+    }
+
+    .ai-chat-prominent .chat-messages{
+        max-height:180px;
+        padding:8px 12px;
+    }
+
+    .ai-chat-prominent .chat-msg{
+        font-size:12px;
+        padding:8px 10px;
+    }
+
+    .ai-chat-prominent .chat-input-row{
+        padding:8px 10px;
+    }
+
+    .ai-chat-prominent .chat-input-row input{
+        font-size:12px;
+        padding:8px 10px;
+    }
+
+    .ai-chat-prominent .chat-input-row button{
+        padding:8px 12px;
+        font-size:12px;
+    }
+
+    .output-details summary{
+        font-size:11px;
+    }
+
+    .output-details pre{
+        font-size:11px;
+        max-height:80px;
+    }
+}
