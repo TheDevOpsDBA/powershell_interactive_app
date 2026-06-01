@@ -369,7 +369,7 @@ async function sendChat() {
     const chatPrompt = 'You are a helpful PowerShell and SQL Server DBA tutor for IT professionals learning PowerShell automation for SQL Server administration. You ONLY answer questions related to PowerShell, SQL Server, DBATools, or the code shown below. If the question is unrelated, politely decline and ask them to keep questions relevant to the course material.\n\nThe student is currently studying: "' + section.title + '"\n\nHere is the code they are looking at:\n```powershell\n' + code + '\n```\n\nThe student asks: "' + question + '"\n\nGive a clear, helpful answer. If the question is about the code, refer to specific lines. If it is a general PowerShell or SQL Server question related to the course, answer it directly. If it is completely unrelated to PowerShell, SQL Server, or DBA work, politely say you can only help with course-related questions. Keep the answer concise but complete (4-6 sentences).';
 
     try {
-        const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + GEMINI_API_KEY;
+        const url = "https://openrouter.ai/api/v1/chat/completions";
 
         const response = await fetch(url, {
                 method: "POST",
@@ -421,6 +421,7 @@ document.addEventListener("keydown", function(e) {
         previousSection();
     }
 });
+
 
 
 
