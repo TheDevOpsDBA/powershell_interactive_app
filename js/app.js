@@ -375,11 +375,10 @@ async function sendChat() {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "Authorization": "Bearer " + OPENROUTER_API_KEY, "HTTP-Referer": window.location.href, "X-Title": "PowerShell for SQL Server DBAs" },
                 body: JSON.stringify({
-                    contents: [{ parts: [{ text: chatPrompt }] }],
-                    generationConfig: {
-                        temperature: 0.7,
-                        maxOutputTokens: 1024
-                    }
+                    model: "google/gemma-4-31b-it:free",
+                    messages: [{ role: "user", content: chatPrompt }],
+                    max_tokens: 1024,
+                    temperature: 0.7
                 })
             }
         );
@@ -421,6 +420,8 @@ document.addEventListener("keydown", function(e) {
         previousSection();
     }
 });
+
+
 
 
 
