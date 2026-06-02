@@ -35,9 +35,9 @@ href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-d
 <button onclick="nextSection()">Next &#x27A1;</button>
 </div>
 
-<div class="layout">
+<div class="main-container">
 
-<div class="left-panel">
+<div class="left-panel" id="leftPanel">
 
 <h3 class="section-heading" id="sectionHeading"></h3>
 
@@ -56,7 +56,9 @@ href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-d
 
 </div>
 
-<div class="right-panel">
+<button class="panel-toggle" id="panelToggle" onclick="toggleRightPanel()">&#x25C0; Code &amp; AI</button>
+
+<div class="right-panel collapsed" id="rightPanel">
 
 <div id="exampleTabs"></div>
 
