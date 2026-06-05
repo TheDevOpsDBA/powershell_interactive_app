@@ -1,4 +1,6 @@
 ﻿let editor;
+let pyodide = null;          // lazily loaded on first Run
+let pyodideLoading = false;
 
 let currentModule = 0;
 let currentSection = 0;
@@ -23,6 +25,13 @@ async function initializeApp() {
             lineNumbers: true
         }
     );
+
+    // Re-evaluate run-vs-copy mode every time the code changes
+    let modeTimer = null;
+    editor.on("change", () => {
+        clearTimeout(modeTimer);
+        modeTimer = setTimeout(refreshExecutionMode, 300);
+    });
 
     loadModules();
 }
@@ -115,11 +124,15 @@ function renderSection() {
     if (section.examples.length > 0) {
 
         editor.setValue(section.examples[0].code);
+        currentExampleIndex = 0;
 
     } else {
 
         editor.setValue("# No examples available");
+        currentExampleIndex = -1;
     }
+
+    setTimeout(refreshExecutionMode, 50);
 }
 
 function renderTabs(section, activeIndex) {
@@ -144,11 +157,13 @@ function renderTabs(section, activeIndex) {
     scratchButton.onclick = () => {
 
         setActiveTab(scratchButton);
+        currentExampleIndex = -1;
 
         editor.setValue(
             localStorage.getItem(section.id)
             || "# Scratch Pad - write your PowerShell here"
         );
+        setTimeout(refreshExecutionMode, 50);
     };
 
     tabs.appendChild(scratchButton);
@@ -165,8 +180,10 @@ function renderTabs(section, activeIndex) {
         button.onclick = () => {
 
             setActiveTab(button);
+            currentExampleIndex = index;
 
             editor.setValue(example.code);
+            setTimeout(refreshExecutionMode, 50);
         };
 
         tabs.appendChild(button);
@@ -197,18 +214,210 @@ function updateDiagram(section) {
     container.parentNode.replaceChild(newBox, container);
 }
 
-function copyToClipboard() {
+function clearOutput() {
 
-    const output = document.getElementById("output");
-    const code = editor.getValue();
+    document.getElementById("output")
+        .textContent = "Paste and run this script in your PowerShell terminal (Run as Administrator for SQL Server commands)";
+}
 
+// ===== HYBRID EXECUTION =====
+//
+// Strategy: every example panel first asks the translator if the current code
+// can be safely run in the browser as Python. If yes → live run via Pyodide
+// and styled PowerShell output. If no → friendly card explaining why, with
+// a one-click Copy button so students can run it locally.
+// =============================================================
+
+async function loadPyodideOnce() {
+    if (pyodide) return pyodide;
+    if (pyodideLoading) {
+        // wait for in-flight load
+        while (pyodideLoading) await new Promise(r => setTimeout(r, 100));
+        return pyodide;
+    }
+    pyodideLoading = true;
+    setOutputLine('Loading runtime (~5 sec, one-time)…', 'info');
+    try {
+        if (typeof loadPyodide !== "function") {
+            await injectScript("https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js");
+        }
+        pyodide = await loadPyodide();
+    } finally {
+        pyodideLoading = false;
+    }
+    return pyodide;
+}
+
+function injectScript(src) {
+    return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+    });
+}
+
+// Render an output line with the PowerShell-terminal look
+function setOutputLine(text, kind) {
+    const out = document.getElementById("output");
+    if (!out) return;
+    out.innerHTML = renderPsOutput(text, kind || "info");
+}
+
+function appendOutputLine(text, kind) {
+    const out = document.getElementById("output");
+    if (!out) return;
+    out.innerHTML += renderPsOutput(text, kind || "info");
+}
+
+function renderPsOutput(text, kind) {
+    // kind: 'prompt' | 'stdout' | 'error' | 'warning' | 'info' | 'verbatim'
+    const escaped = String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    const cls = "psout-" + kind;
+    return '<span class="' + cls + '">' + escaped + '</span>\n';
+}
+
+// Detect mode of the currently-loaded code and update the run/copy area accordingly
+function refreshExecutionMode() {
+    const code = editor ? editor.getValue() : "";
+    const section = courseData.modules[currentModule].sections[currentSection];
+    const example = (section.examples || [])[currentExampleIndex];
+    const forcedMode = example && example.mode;  // "browser" | "copy" | undefined (auto)
+
+    let result;
+    if (forcedMode === "copy") {
+        result = { ok: false, reason: "this example is meant to run on a real PowerShell terminal" };
+    } else if (forcedMode === "browser") {
+        result = window.PsTranslator.translate(code);
+    } else {
+        result = window.PsTranslator.translate(code);
+    }
+
+    const badge   = document.getElementById("modeBadge");
+    const runBtn  = document.getElementById("runBtn");
+    const copyBtn = document.getElementById("copyBtn");
+    const note    = document.getElementById("modeNote");
+
+    if (result.ok) {
+        // Browser-runnable
+        if (badge) {
+            badge.className = "mode-badge mode-browser";
+            badge.textContent = "🟢 Runs in browser";
+        }
+        if (runBtn) {
+            runBtn.style.display = "";
+            runBtn.disabled = false;
+            runBtn.title = "Run this script in the browser";
+        }
+        if (note) {
+            note.innerHTML = '<strong>Live preview:</strong> output is rendered to look like PowerShell. ' +
+                'For real Windows-specific behaviour, copy and run locally.';
+            note.className = "mode-note ok";
+        }
+    } else {
+        // Needs real PowerShell
+        if (badge) {
+            badge.className = "mode-badge mode-copy";
+            badge.textContent = "📋 Copy to terminal";
+        }
+        if (runBtn) {
+            runBtn.style.display = "none";
+        }
+        if (note) {
+            note.innerHTML = '<strong>This script needs real PowerShell</strong> — ' +
+                (result.reason ? escapeHtmlText(result.reason) + '.' : '') +
+                ' Click <em>Copy to Clipboard</em> and paste it in your PowerShell terminal.';
+            note.className = "mode-note copy";
+        }
+    }
+}
+
+function escapeHtmlText(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Track which example tab the user is on so we can read the right mode override
+let currentExampleIndex = 0;
+
+async function runScript() {
+    const code = editor ? editor.getValue() : "";
     if (!code.trim()) {
-        output.textContent = "\u26A0 No code to copy. Write or select an example first.";
+        setOutputLine('No code to run.', 'warning');
         return;
     }
 
+    // Try to translate
+    const r = window.PsTranslator.translate(code);
+    if (!r.ok) {
+        setOutputLine('This script needs real PowerShell.\n' +
+            'Reason: ' + r.reason + '\n\n' +
+            'Click "Copy to Clipboard" and run it in your PowerShell terminal.', 'warning');
+        return;
+    }
+
+    // Render the PowerShell-style prompt + Loading state
+    const out = document.getElementById("output");
+    out.innerHTML = renderPsOutput("PS C:\\Lab> .\\example.ps1", "prompt");
+
+    try {
+        const py = await loadPyodideOnce();
+        appendOutputLine("", "stdout"); // separator
+
+        let collected = "";
+        py.setStdout({
+            batched: (msg) => { collected += msg + "\n"; }
+        });
+        py.setStderr({
+            batched: (msg) => { collected += "STDERR: " + msg + "\n"; }
+        });
+
+        await py.runPythonAsync(r.python);
+
+        // Render collected output
+        if (collected.trim()) {
+            appendOutputLine(collected.replace(/\s+$/, ""), "stdout");
+        } else {
+            appendOutputLine("(no output)", "info");
+        }
+
+        if (r.warnings && r.warnings.length > 0) {
+            appendOutputLine("", "info");
+            appendOutputLine("⚠ Some lines were skipped in this preview:", "warning");
+            r.warnings.forEach(w => {
+                appendOutputLine("  Line " + w.line + ": " + w.text, "warning");
+            });
+        }
+
+    } catch (err) {
+        // Mimic PowerShell's red error block
+        const msg = err && err.message ? err.message : String(err);
+        appendOutputLine("", "info");
+        appendOutputLine(msg, "error");
+        appendOutputLine("    + CategoryInfo          : NotSpecified: (browser-preview)", "error");
+        appendOutputLine("    + FullyQualifiedErrorId : LabPreviewError", "error");
+    }
+}
+
+// Patched copyToClipboard that also gives terminal-styled output
+function copyToClipboard() {
+    const code = editor.getValue();
+    if (!code.trim()) {
+        setOutputLine('No code to copy. Write or select an example first.', 'warning');
+        return;
+    }
     navigator.clipboard.writeText(code).then(() => {
-        output.textContent = "\u2705 Code copied to clipboard!\n\nPaste and run this script in your PowerShell terminal.\n(Run as Administrator for SQL Server commands)\n\nTip: Right-click in PowerShell terminal \u2192 Paste, then press Enter.";
+        const out = document.getElementById("output");
+        out.innerHTML =
+            renderPsOutput('✓ Code copied to clipboard.', 'stdout') +
+            renderPsOutput('', 'info') +
+            renderPsOutput('Next steps:', 'info') +
+            renderPsOutput('  1. Open Windows PowerShell (Run as Administrator for SQL/system tasks)', 'info') +
+            renderPsOutput('  2. Right-click in the terminal → Paste', 'info') +
+            renderPsOutput('  3. Press Enter', 'info');
     }).catch(err => {
         // Fallback for older browsers
         const textarea = document.createElement("textarea");
@@ -217,14 +426,8 @@ function copyToClipboard() {
         textarea.select();
         document.execCommand("copy");
         document.body.removeChild(textarea);
-        output.textContent = "\u2705 Code copied to clipboard!\n\nPaste and run this script in your PowerShell terminal.\n(Run as Administrator for SQL Server commands)";
+        setOutputLine('✓ Code copied to clipboard. Paste it in your PowerShell terminal.', 'stdout');
     });
-}
-
-function clearOutput() {
-
-    document.getElementById("output")
-        .textContent = "Paste and run this script in your PowerShell terminal (Run as Administrator for SQL Server commands)";
 }
 
 let revealItems = [];

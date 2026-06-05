@@ -783,3 +783,108 @@ select{
         max-height:80px;
     }
 }
+
+
+/* ============================================================ */
+/* HYBRID EXECUTION — mode bar, run button, PS-styled terminal  */
+/* ============================================================ */
+.mode-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: rgba(15, 23, 42, 0.6);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    border: 1px solid rgba(148, 163, 184, 0.12);
+}
+.mode-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 14px;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.mode-badge.mode-browser {
+    background: rgba(0, 212, 170, 0.15);
+    color: #6ee7d3;
+    border: 1px solid rgba(0, 212, 170, 0.35);
+}
+.mode-badge.mode-copy {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fcd34d;
+    border: 1px solid rgba(245, 158, 11, 0.35);
+}
+.mode-note {
+    color: #cbd5e1;
+    font-size: 12px;
+    line-height: 1.5;
+    flex: 1;
+    min-width: 0;
+}
+.mode-note strong { color: #f1f5f9; }
+.mode-note em { color: #fcd34d; font-style: normal; }
+.mode-note.copy { color: #fcd34d; }
+
+/* Buttons */
+.action-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.run-btn {
+    background: linear-gradient(135deg, #00d4aa, #6366f1) !important;
+    color: #fff !important;
+    border: none !important;
+    font-weight: 600 !important;
+    box-shadow: 0 4px 14px rgba(0, 212, 170, 0.25);
+}
+.run-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(0, 212, 170, 0.4);
+}
+.run-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+.ghost-btn {
+    background: transparent !important;
+    color: #94a3b8 !important;
+    border: 1px solid rgba(148, 163, 184, 0.25) !important;
+}
+
+/* PowerShell-styled terminal output */
+.ps-terminal {
+    background: #012456 !important;        /* classic PowerShell blue */
+    color: #f0f0f0;
+    font-family: 'Cascadia Code', 'Consolas', 'JetBrains Mono', 'Courier New', monospace !important;
+    padding: 14px 16px;
+    border-radius: 6px;
+    line-height: 1.55;
+    font-size: 13px;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+.ps-terminal .psout-prompt   { color: #00d7ff; }                    /* PS prompt cyan */
+.ps-terminal .psout-stdout   { color: #ffff00; font-weight: 500; }  /* Write-Host yellow */
+.ps-terminal .psout-info     { color: #d4d4d4; }                    /* default text */
+.ps-terminal .psout-warning  { color: #ffae00; }                    /* warning amber */
+.ps-terminal .psout-error    {
+    color: #ff4040;
+    background: #800000;
+    display: inline-block;
+    padding: 0 4px;
+    border-radius: 2px;
+}
+.ps-terminal .psout-verbatim { color: #00ff00; }                    /* green */
+
+/* Override the details/summary styling so the terminal section is visible by default */
+.output-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 8px 0;
+    color: #94a3b8;
+}
+.output-details[open] summary { margin-bottom: 8px; }
