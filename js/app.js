@@ -1,4 +1,4 @@
-﻿let editor;
+let editor;
 let pyodide;
 
 let currentModule = 0;
@@ -16,38 +16,36 @@ let lastSessionSaveTimer = null; // debounced last-session save
 let chatHistory = [];            // in-memory current section's chat (synced w/ localStorage)
 let cloudHydrated = false;       // becomes true once cloud data has been merged in
 
-// Entitlement state for the current course
-let currentEntitlement = null;            // { tier: "full"|"preview", source, ... } or null
-let entitlementUnsubscribe = null;        // listener cleanup
-const PREVIEW_MODULE_LIMIT = 3;
-const ENROLL_URL = "https://www.powershellacademy.com/s/store";
+// Cloudflare Worker � session-based access
+const WORKER_BASE = "https://graphy-enrollment-webhook.powershell4u.workers.dev";
 
-// Cloudflare Worker that brokers Graphy webhooks and claim-pending requests.
-const WORKER_URL    = "https://graphy-enrollment-webhook.powershell4u.workers.dev";
-const WORKER_SECRET = "gly_xq7v9R2kPm8N4tH6sZ3wA1bEcF5dG0jL";
+let labSession = null;
 
-async function claimPendingViaWorker(uid, email) {
-    if (!uid || !email) return;
+async function checkLabSession() {
     try {
-        const res = await fetch(`${WORKER_URL}/claim`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-webhook-secret": WORKER_SECRET },
-            body: JSON.stringify({ uid, email })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (data && Array.isArray(data.claimed) && data.claimed.length > 0) {
-            console.info("Claimed pending entitlements:", data.claimed);
+        const urlParams = new URLSearchParams(window.location.search);
+        let token = urlParams.get('session_token') || sessionStorage.getItem('lab_session_token') || '';
+        if (token) {
+            sessionStorage.setItem('lab_session_token', token);
+            if (urlParams.get('session_token')) {
+                urlParams.delete('session_token');
+                urlParams.delete('access');
+                const cleanUrl = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
+                window.history.replaceState({}, '', cleanUrl);
+            }
         }
+        if (!token) { labSession = { valid: false, reason: "no-token" }; return labSession; }
+        const res = await fetch(WORKER_BASE + '/verify?token=' + encodeURIComponent(token));
+        labSession = await res.json();
     } catch (e) {
-        console.warn("Worker /claim call failed:", e && e.message);
+        console.warn("Session verify failed:", e);
+        labSession = { valid: false, reason: "network-error" };
     }
+    return labSession;
 }
 
 function hasFullAccess() {
-    if (!currentEntitlement) return false;
-    if (currentEntitlement.tier !== "full") return false;
-    if (currentEntitlement.expiresAt && Date.now() > currentEntitlement.expiresAt) return false;
-    return true;
+    return labSession && labSession.valid === true;
 }
 
 function isModuleLocked(moduleIdx) {
@@ -77,17 +75,17 @@ const LEVELS = [
 ];
 
 const BADGES = [
-    { id: "first-steps",       name: "First Steps",        icon: "👣",  desc: "Complete your first section" },
-    { id: "first-run",         name: "First Run",          icon: "▶️",  desc: "Run code for the first time" },
-    { id: "ps-foundation",     name: "PowerShell Foundation", icon: "⚡", desc: "Complete Introduction & Lab Setup" },
-    { id: "dbatools-pro",      name: "DBATools Pro",       icon: "🛠️", desc: "Complete the DBATools module" },
-    { id: "backup-master",     name: "Backup Master",      icon: "💾", desc: "Complete Backups & Restore" },
-    { id: "security-guardian", name: "Security Guardian",  icon: "🛡️", desc: "Complete Security Management" },
-    { id: "monitoring-ace",    name: "Monitoring Ace",     icon: "📊", desc: "Complete the Grafana Monitoring Dashboard module" },
-    { id: "ag-architect",      name: "Always-On Architect", icon: "🏛️", desc: "Complete Always On Availability Groups" },
-    { id: "lab-rat",           name: "Lab Rat",            icon: "🧪", desc: "Complete 5 lab challenges" },
-    { id: "code-runner",       name: "Code Runner",        icon: "🏃", desc: "Run code 50 times" },
-    { id: "champion",          name: "Course Champion",    icon: "🏆", desc: "Complete all modules" }
+    { id: "first-steps",       name: "First Steps",        icon: "??",  desc: "Complete your first section" },
+    { id: "first-run",         name: "First Run",          icon: "??",  desc: "Run code for the first time" },
+    { id: "ps-foundation",     name: "PowerShell Foundation", icon: "?", desc: "Complete Introduction & Lab Setup" },
+    { id: "dbatools-pro",      name: "DBATools Pro",       icon: "???", desc: "Complete the DBATools module" },
+    { id: "backup-master",     name: "Backup Master",      icon: "??", desc: "Complete Backups & Restore" },
+    { id: "security-guardian", name: "Security Guardian",  icon: "???", desc: "Complete Security Management" },
+    { id: "monitoring-ace",    name: "Monitoring Ace",     icon: "??", desc: "Complete the Grafana Monitoring Dashboard module" },
+    { id: "ag-architect",      name: "Always-On Architect", icon: "???", desc: "Complete Always On Availability Groups" },
+    { id: "lab-rat",           name: "Lab Rat",            icon: "??", desc: "Complete 5 lab challenges" },
+    { id: "code-runner",       name: "Code Runner",        icon: "??", desc: "Run code 50 times" },
+    { id: "champion",          name: "Course Champion",    icon: "??", desc: "Complete all modules" }
 ];
 
 function getProgressKey() {
@@ -106,7 +104,7 @@ function getProgress() {
         const key = getProgressKey();
         const saved = localStorage.getItem(key);
         if (saved) return { ...defaults, ...JSON.parse(saved) };
-        // Legacy "pythonLabProgress" is intentionally NOT auto-migrated here — it
+        // Legacy "pythonLabProgress" is intentionally NOT auto-migrated here � it
         // contained XP from whichever course wrote last, so copying it forward
         // would leak progress between courses. Cloud is the source of truth on
         // sign-in. We only clear the legacy key so future reads start clean.
@@ -149,7 +147,7 @@ function syncProgressToCloud(progress) {
 }
 
 // ============================================================
-// SESSION PERSISTENCE — last position, editor code, chat memory
+// SESSION PERSISTENCE � last position, editor code, chat memory
 // ============================================================
 
 const STORAGE_KEYS = {
@@ -199,7 +197,7 @@ function saveEditorCode(sectionId, code) {
     try {
         localStorage.setItem(STORAGE_KEYS.editorPrefix + sectionId, code);
     } catch (e) {
-        // Quota exceeded — prune oldest editor entries
+        // Quota exceeded � prune oldest editor entries
         pruneEditorStorage();
         try { localStorage.setItem(STORAGE_KEYS.editorPrefix + sectionId, code); } catch (_) {}
     }
@@ -229,7 +227,7 @@ function pruneEditorStorage() {
         if (k && k.startsWith(STORAGE_KEYS.editorPrefix)) keys.push(k);
     }
     if (keys.length <= MAX_EDITOR_SECTIONS) return;
-    // We don't track per-key timestamps separately — just drop the first N keys
+    // We don't track per-key timestamps separately � just drop the first N keys
     keys.slice(0, keys.length - MAX_EDITOR_SECTIONS).forEach(k => localStorage.removeItem(k));
 }
 
@@ -241,7 +239,7 @@ function saveChatHistory(sectionId, messages) {
     try {
         localStorage.setItem(STORAGE_KEYS.chatPrefix + sectionId, JSON.stringify(trimmed));
     } catch (e) {
-        // Storage full — drop the oldest chat entry, retry once
+        // Storage full � drop the oldest chat entry, retry once
         const k = findOldestChatKey();
         if (k) localStorage.removeItem(k);
         try { localStorage.setItem(STORAGE_KEYS.chatPrefix + sectionId, JSON.stringify(trimmed)); } catch (_) {}
@@ -278,11 +276,11 @@ function showSaveStatus(state) {
     if (!el) return;
     el.classList.remove('saving', 'saved', 'synced', 'error', 'local');
     switch (state) {
-        case 'saving': el.classList.add('saving'); el.textContent = '● Saving…'; break;
-        case 'saved':  el.classList.add('saved');  el.textContent = '✓ Saved';    break;
-        case 'synced': el.classList.add('synced'); el.textContent = '☁ Synced';   break;
-        case 'error':  el.classList.add('error');  el.textContent = '⚠ Sync failed'; break;
-        case 'local':  el.classList.add('local');  el.textContent = '✎ Local only'; break;
+        case 'saving': el.classList.add('saving'); el.textContent = '? Saving�'; break;
+        case 'saved':  el.classList.add('saved');  el.textContent = '? Saved';    break;
+        case 'synced': el.classList.add('synced'); el.textContent = '? Synced';   break;
+        case 'error':  el.classList.add('error');  el.textContent = '? Sync failed'; break;
+        case 'local':  el.classList.add('local');  el.textContent = '? Local only'; break;
         default: el.textContent = '';
     }
     if (state === 'saved' || state === 'synced') {
@@ -299,7 +297,7 @@ function showRestoredIndicator() {
     if (!el) return;
     el.classList.remove('saving', 'saved', 'synced', 'error', 'local');
     el.classList.add('restored');
-    el.textContent = '↺ Restored your code';
+    el.textContent = '? Restored your code';
     clearTimeout(el._fadeTimer);
     el._fadeTimer = setTimeout(() => {
         el.classList.remove('restored');
@@ -329,7 +327,7 @@ function maybeShowResumeBanner() {
     const banner = document.getElementById('resumeBanner');
     if (!banner) return;
     document.getElementById('resumeText').innerHTML =
-        '👋 Welcome back! Resume from <strong>' + mod.title + '</strong> &raquo; <strong>' + sec.title + '</strong>?';
+        '?? Welcome back! Resume from <strong>' + mod.title + '</strong> &raquo; <strong>' + sec.title + '</strong>?';
     banner.style.display = 'flex';
 
     document.getElementById('resumeYes').onclick = () => {
@@ -398,19 +396,19 @@ function updateGamificationUI() {
 
     // Streak
     updateStreak();
-    document.getElementById("streakDisplay").textContent = "🔥" + progress.streak.current;
+    document.getElementById("streakDisplay").textContent = "??" + progress.streak.current;
 
     // Show user name
     const nameEl = document.getElementById('userName');
     if (nameEl) {
         const name = localStorage.getItem('labUserName') || 'Student';
-        nameEl.textContent = '👤 ' + name;
+        nameEl.textContent = '?? ' + name;
         nameEl.onclick = function() {
             const newName = prompt('Change your display name:', name);
             if (newName && newName.trim()) {
                 const trimmed = newName.trim();
                 localStorage.setItem('labUserName', trimmed);
-                nameEl.textContent = '👤 ' + trimmed;
+                nameEl.textContent = '?? ' + trimmed;
                 // Sync display name to Firebase profile + DB
                 if (currentUser && !currentUser.isGuest && window.fbHelpers) {
                     window.fbHelpers.updateName(trimmed).catch(()=>{});
@@ -475,7 +473,7 @@ function showXPFloat(text) {
 
 function showLevelUp(levelInfo) {
     const banner = document.getElementById("levelupBanner");
-    document.getElementById("levelupText").textContent = "⬆️ Level " + levelInfo.level + " — " + levelInfo.title + "!";
+    document.getElementById("levelupText").textContent = "?? Level " + levelInfo.level + " � " + levelInfo.title + "!";
     banner.style.display = "block";
     banner.style.animation = "none";
     void banner.offsetWidth;
@@ -613,6 +611,10 @@ async function initializeApp() {
 
     pyodide = await loadPyodide();
 
+    // Check Cloudflare Worker session
+    await checkLabSession();
+
+
     // Wait for Firebase to be ready, then check auth state.
     // If Firebase never loads (CDN blocked, etc.) fall back to local-only mode after 4s.
     if (window.fbHelpers) {
@@ -624,7 +626,7 @@ async function initializeApp() {
         setTimeout(() => {
             if (!booted) {
                 booted = true;
-                console.warn("Firebase did not load — running in local-only mode.");
+                console.warn("Firebase did not load � running in local-only mode.");
                 hideAuthScreen();
                 hideBootSplash();
                 if (!localStorage.getItem('labUserName')) localStorage.setItem('labUserName', 'Student');
@@ -677,7 +679,7 @@ function bootAuth() {
             const cloudName  = cloud && cloud.displayName ? cloud.displayName.trim() : "";
             const localName  = (localStorage.getItem('labUserName') || "").trim();
             const googleName = (user.displayName || "").trim();
-            // Source-of-truth order: cloud (custom name) → localStorage → Google → email prefix
+            // Source-of-truth order: cloud (custom name) ? localStorage ? Google ? email prefix
             const preferredName = cloudName
                 || localName
                 || googleName
@@ -735,18 +737,18 @@ function bootAuth() {
                             const wasLocked  = !hasFullAccess();
                             currentEntitlement = ent;
                             const nowUnlocked = hasFullAccess();
-                            // Rebuild module dropdown labels so 🔒 marks update
+                            // Rebuild module dropdown labels so ?? marks update
                             if (typeof loadModules === 'function' && document.getElementById('moduleSelect')) {
                                 const sel = document.getElementById('moduleSelect');
                                 Array.from(sel.options).forEach((opt, i) => {
                                     const m = courseData.modules[i];
                                     if (!m) return;
-                                    opt.textContent = (isModuleLocked(i) ? '🔒 ' : '') + m.title;
+                                    opt.textContent = (isModuleLocked(i) ? '?? ' : '') + m.title;
                                     opt.style.color = isModuleLocked(i) ? '#94a3b8' : '';
                                 });
                             }
                             if (wasLocked && nowUnlocked) {
-                                showToast('🔓 Course unlocked! Welcome.');
+                                showToast('?? Course unlocked! Welcome.');
                                 renderSection();
                             }
                         });
@@ -764,7 +766,7 @@ function bootAuth() {
             hideBootSplash();
             startMainApp();
         } else {
-            // Signed out — show login (guest still allowed)
+            // Signed out � show login (guest still allowed)
             currentUser = null;
             hideBootSplash();
             showAuthScreen();
@@ -782,7 +784,7 @@ function mergeCloudIntoLocal(cloud) {
     const local = getProgress();
 
     // If the cloud was reset by an admin AFTER our last local save, the cloud
-    // is authoritative — wipe local. Otherwise merge optimistically.
+    // is authoritative � wipe local. Otherwise merge optimistically.
     const cloudResetAt = typeof cloud.resetAt === 'number' ? cloud.resetAt : 0;
     const localSavedAt = typeof local.lastSavedAt === 'number' ? local.lastSavedAt : 0;
     const cloudWins = cloudResetAt > 0 && cloudResetAt >= localSavedAt;
@@ -803,7 +805,7 @@ function mergeCloudIntoLocal(cloud) {
         localStorage.setItem(getProgressKey(), JSON.stringify(merged));
         localStorage.setItem('completedChallenges',     JSON.stringify(cloud.completedChallenges || []));
         localStorage.setItem('viewedChallengeSolutions', JSON.stringify(cloud.viewedChallengeSolutions || []));
-        console.info("Cloud reset detected — local progress replaced with cloud snapshot.");
+        console.info("Cloud reset detected � local progress replaced with cloud snapshot.");
     } else {
         merged = {
             ...local,
@@ -824,7 +826,7 @@ function mergeCloudIntoLocal(cloud) {
         localStorage.setItem('viewedChallengeSolutions', JSON.stringify(Array.from(new Set([...localViewed, ...cloudViewed]))));
     }
 
-    // Cloud's display name might be older than the in-memory current name —
+    // Cloud's display name might be older than the in-memory current name �
     // bootAuth has already chosen the correct one. Don't overwrite it.
     if (cloud.displayName && !currentUser) localStorage.setItem('labUserName', cloud.displayName);
 
@@ -848,7 +850,7 @@ function mergeCloudIntoLocal(cloud) {
 }
 
 // Pull every section's editor code + chat into localStorage so opening a section
-// instantly shows what the user last had — no extra round-trips needed.
+// instantly shows what the user last had � no extra round-trips needed.
 function hydrateEditorAndChatFromCloud({ editorState, chatHistory: chatMap }) {
     if (editorState && typeof editorState === 'object') {
         Object.keys(editorState).forEach(sectionId => {
@@ -967,17 +969,12 @@ async function authSignInGuest() {
 }
 
 async function authSignOut() {
-    if (!confirm('Sign out of the lab? Your progress is saved to the cloud and will reload when you sign back in.')) return;
-    if (!window.fbHelpers) {
-        // Local-only fallback mode
-        location.reload();
-        return;
-    }
-    try {
-        await window.fbHelpers.signOut();
-    } catch (e) {}
-    location.reload();
+    if (!confirm('Sign out? You will be redirected to PowerShell Academy.')) return;
+    sessionStorage.removeItem('lab_session_token');
+    if (window.fbHelpers) { try { await window.fbHelpers.signOut(); } catch(e){} }
+    window.location.href = "https://graphy-enrollment-webhook.powershell4u.workers.dev/sso/logout";
 }
+
 
 function friendlyAuthError(err) {
     const code = (err && err.code) || '';
@@ -1000,7 +997,7 @@ function loadModules() {
         const option = document.createElement("option");
 
         option.value = index;
-        const lockMark = isModuleLocked(index) ? '🔒 ' : '';
+        const lockMark = isModuleLocked(index) ? '?? ' : '';
         option.textContent = lockMark + module.title;
         if (isModuleLocked(index)) option.style.color = '#94a3b8';
 
@@ -1035,7 +1032,7 @@ function loadSections() {
         const option = document.createElement("option");
 
         option.value = index;
-        const mark = completed.includes(section.id) ? '✓ ' : '○ ';
+        const mark = completed.includes(section.id) ? '? ' : '? ';
         option.textContent = mark + section.title;
 
         sectionSelect.appendChild(option);
@@ -1059,7 +1056,7 @@ function renderSection() {
         courseData.modules[currentModule]
         .sections[currentSection];
 
-    // Entitlement gate — modules beyond the preview limit need an active entitlement.
+    // Entitlement gate � modules beyond the preview limit need an active entitlement.
     if (isModuleLocked(currentModule)) {
         renderLockedSection();
         return;
@@ -1075,10 +1072,10 @@ function renderSection() {
         lastRenderedModule = currentModule;
         const obj = module.labObjective;
         document.getElementById('labObjText').textContent = obj.objective;
-        document.getElementById('labObjTime').textContent = '⏱ ' + obj.duration;
+        document.getElementById('labObjTime').textContent = '? ' + obj.duration;
 
         const diffEl = document.getElementById('labObjDifficulty');
-        diffEl.textContent = '🧠 ' + obj.difficulty;
+        diffEl.textContent = '?? ' + obj.difficulty;
         diffEl.className = 'lab-obj-badge difficulty ' + obj.difficulty.toLowerCase();
 
         document.getElementById('labObjSkills').innerHTML = obj.skills.map(s => '<span>' + s + '</span>').join('');
@@ -1156,9 +1153,9 @@ function renderSection() {
 
     // Update file badge
     if (section.examples && section.examples.length > 0) {
-        document.getElementById('fileBadge').textContent = '📄 ' + section.examples[0].name + '.ps1';
+        document.getElementById('fileBadge').textContent = '?? ' + section.examples[0].name + '.ps1';
     } else {
-        document.getElementById('fileBadge').textContent = '📄 scratch.ps1';
+        document.getElementById('fileBadge').textContent = '?? scratch.ps1';
     }
 
     // Update line count
@@ -1199,7 +1196,7 @@ function renderTabs(section, activeIndex) {
     const scratchButton =
         document.createElement("button");
 
-    scratchButton.innerText = "✏ Scratch Pad";
+    scratchButton.innerText = "? Scratch Pad";
     scratchButton.className = "example-btn";
 
     scratchButton.onclick = () => {
@@ -1264,7 +1261,7 @@ function updateDiagram(section) {
 
 // ============================================================
 // HYBRID EXECUTION (PowerShell)
-//   Translate safe PowerShell → Python and run via Pyodide.
+//   Translate safe PowerShell ? Python and run via Pyodide.
 //   Anything outside the whitelist falls back to a friendly
 //   "Copy to terminal" instruction.
 // ============================================================
@@ -1275,19 +1272,19 @@ async function runCode() {
 
     const code = editor.getValue();
     if (!code.trim()) {
-        output.textContent = "⚠ No code to run.";
+        output.textContent = "? No code to run.";
         return;
     }
 
     if (!window.PsTranslator) {
-        output.textContent = "Translator not loaded — refresh the page.";
+        output.textContent = "Translator not loaded � refresh the page.";
         return;
     }
 
     const r = window.PsTranslator.translate(code);
     if (!r.ok) {
         output.textContent =
-            "📋 This script needs real PowerShell.\n" +
+            "?? This script needs real PowerShell.\n" +
             "Reason: " + r.reason + "\n\n" +
             "Click 'Copy' and paste it in your PowerShell terminal.";
         return;
@@ -1303,7 +1300,7 @@ async function runCode() {
         });
         await pyodide.runPythonAsync(r.python);
         if (r.warnings && r.warnings.length > 0) {
-            output.textContent += "\n⚠ Some lines were skipped in this preview:\n";
+            output.textContent += "\n? Some lines were skipped in this preview:\n";
             r.warnings.forEach(w => {
                 output.textContent += "  Line " + w.line + ": " + w.text + "\n";
             });
@@ -1319,19 +1316,19 @@ async function runSelected() {
     const selected = editor.getSelection();
 
     if (!selected.trim()) {
-        output.textContent = "⚠ No code selected. Highlight lines to run them.";
+        output.textContent = "? No code selected. Highlight lines to run them.";
         return;
     }
 
     if (!window.PsTranslator) {
-        output.textContent = "Translator not loaded — refresh the page.";
+        output.textContent = "Translator not loaded � refresh the page.";
         return;
     }
 
     const r = window.PsTranslator.translate(selected);
     if (!r.ok) {
         output.textContent =
-            "📋 This selection needs real PowerShell.\n" +
+            "?? This selection needs real PowerShell.\n" +
             "Reason: " + r.reason + "\n\n" +
             "Click 'Copy' and paste it in your PowerShell terminal.";
         return;
@@ -1359,7 +1356,7 @@ function clearOutput() {
 function copyCode() {
     const code = editor.getValue();
     navigator.clipboard.writeText(code).then(() => {
-        showToast('📋 Code copied — paste it in your PowerShell terminal.');
+        showToast('?? Code copied � paste it in your PowerShell terminal.');
     });
 }
 
@@ -1450,7 +1447,7 @@ function nextSection() {
         currentModule++;
         currentSection = 0;
 
-        showToast('🎉 Module Complete!');
+        showToast('?? Module Complete!');
         addXP(50, "Module complete");
 
         loadSections();
@@ -1578,7 +1575,7 @@ function addChatMessage(text, role, opts) {
     
     const avatar = document.createElement("div");
     avatar.className = "ai-msg-avatar";
-    avatar.textContent = isUser ? "👤" : "🤖";
+    avatar.textContent = isUser ? "??" : "??";
     
     const bubble = document.createElement("div");
     bubble.className = "ai-msg-bubble";
@@ -1589,7 +1586,7 @@ function addChatMessage(text, role, opts) {
     messages.appendChild(msg);
     messages.scrollTop = messages.scrollHeight;
 
-    // Persist message unless caller opted out (e.g. transient "thinking…" indicator)
+    // Persist message unless caller opted out (e.g. transient "thinking�" indicator)
     if (!(opts && opts.transient) && !role.includes("loading")) {
         const sec = courseData.modules[currentModule] &&
             courseData.modules[currentModule].sections[currentSection];
@@ -1612,8 +1609,8 @@ function restoreChatHistory(sectionId) {
     // Reset to the welcome state
     messages.innerHTML =
         '<div class="ai-msg assistant">' +
-            '<div class="ai-msg-avatar">🤖</div>' +
-            '<div class="ai-msg-bubble">Hey! I\'m your AI mentor for this module. I can see your code and output — ask me anything!</div>' +
+            '<div class="ai-msg-avatar">??</div>' +
+            '<div class="ai-msg-bubble">Hey! I\'m your AI mentor for this module. I can see your code and output � ask me anything!</div>' +
         '</div>';
 
     chatHistory = loadChatHistory(sectionId);
@@ -1626,7 +1623,7 @@ function restoreChatHistory(sectionId) {
         wrap.className = "ai-msg " + (isUser ? "user" : "assistant");
         const av = document.createElement("div");
         av.className = "ai-msg-avatar";
-        av.textContent = isUser ? "👤" : "🤖";
+        av.textContent = isUser ? "??" : "??";
         const b = document.createElement("div");
         b.className = "ai-msg-bubble";
         b.innerHTML = m.text;
@@ -1656,7 +1653,7 @@ async function sendChat() {
         }
     }
 
-    const loadingMsg = addChatMessage('<span class="typing-dots"><span>●</span><span>●</span><span>●</span></span>', "bot loading", { transient: true });
+    const loadingMsg = addChatMessage('<span class="typing-dots"><span>?</span><span>?</span><span>?</span></span>', "bot loading", { transient: true });
 
     const code = editor ? editor.getValue() : "";
     const section = courseData.modules[currentModule].sections[currentSection];
@@ -1739,7 +1736,7 @@ function checkAnswer() {
     const feedback = document.getElementById('labFeedback');
     feedback.style.display = 'block';
     feedback.className = 'lab-feedback';
-    feedback.innerHTML = '<span class="typing-dots"><span>●</span><span>●</span><span>●</span></span> Evaluating...';
+    feedback.innerHTML = '<span class="typing-dots"><span>?</span><span>?</span><span>?</span></span> Evaluating...';
     
     const evalPrompt = `You are evaluating a beginner's Python code for a learning exercise.
 
@@ -1755,10 +1752,10 @@ ${code}
 Evaluate the code. Be encouraging and beginner-friendly. Format your response EXACTLY like this:
 
 VERDICT: PASS or NEEDS_WORK
-✓ [list what they got right, one per line]
-✗ [list what's missing or wrong, one per line, only if NEEDS_WORK]
-💡 [one specific improvement tip]
-🎉 [one sentence of encouragement]`;
+? [list what they got right, one per line]
+? [list what's missing or wrong, one per line, only if NEEDS_WORK]
+?? [one specific improvement tip]
+?? [one sentence of encouragement]`;
 
     // Use the AI to evaluate
     callAIForLab(evalPrompt, feedback);
@@ -1800,7 +1797,7 @@ async function callAIForLab(prompt, feedbackEl, onResult) {
                 let answer = data.choices[0].message.content;
                 const isPass = /VERDICT:\s*PASS\b/i.test(answer);
                 feedbackEl.className = 'lab-feedback ' + (isPass ? 'pass' : 'needs-work');
-                answer = answer.replace(/VERDICT:\s*(PASS|NEEDS_WORK)/gi, isPass ? '✅ PASS — Well done!' : '🔄 NEEDS WORK — Keep trying!');
+                answer = answer.replace(/VERDICT:\s*(PASS|NEEDS_WORK)/gi, isPass ? '? PASS � Well done!' : '?? NEEDS WORK � Keep trying!');
                 answer = answer.replace(/\n/g, '<br>');
                 feedbackEl.innerHTML = answer;
                 if (isPass) { trackLabComplete(); addXP(25, "Lab passed"); }
@@ -1819,7 +1816,7 @@ function showHint() {
     const feedback = document.getElementById('labFeedback');
     feedback.style.display = 'block';
     feedback.className = 'lab-feedback';
-    feedback.innerHTML = '💡 <strong>Hint:</strong> ' + section.lab.hint;
+    feedback.innerHTML = '?? <strong>Hint:</strong> ' + section.lab.hint;
 }
 
 function showSolution() {
@@ -1828,7 +1825,7 @@ function showSolution() {
     const feedback = document.getElementById('labFeedback');
     feedback.style.display = 'block';
     feedback.className = 'lab-feedback';
-    feedback.innerHTML = '👁 <strong>Solution:</strong><br><pre style="background:#111827;padding:10px;border-radius:6px;margin-top:8px;color:#00d4aa;font-size:12px;white-space:pre-wrap;">' + section.lab.solution + '</pre>';
+    feedback.innerHTML = '?? <strong>Solution:</strong><br><pre style="background:#111827;padding:10px;border-radius:6px;margin-top:8px;color:#00d4aa;font-size:12px;white-space:pre-wrap;">' + section.lab.solution + '</pre>';
 }
 
 // ===== CHALLENGE MODE =====
@@ -1942,16 +1939,16 @@ function showChallengeList() {
         const attendedOnly = !done && viewed.includes(ch.id);
 
         let statusClass = 'pending';
-        let statusText = '○ Not attempted';
+        let statusText = '? Not attempted';
         let cardClass = '';
 
         if (done) {
             statusClass = 'done';
-            statusText = '✓ Completed';
+            statusText = '? Completed';
             cardClass = ' completed';
         } else if (attendedOnly) {
             statusClass = 'attended';
-            statusText = '👁 Solution viewed';
+            statusText = '?? Solution viewed';
             cardClass = ' attended';
         }
 
@@ -1968,7 +1965,7 @@ function showChallengeList() {
 
     const attendedOnlyCount = viewed.filter(id => !completed.includes(id)).length;
     const summary = completed.length + '/' + CHALLENGES.length + ' completed' +
-        (attendedOnlyCount > 0 ? ' • ' + attendedOnlyCount + ' attended' : '');
+        (attendedOnlyCount > 0 ? ' � ' + attendedOnlyCount + ' attended' : '');
     document.getElementById('challengeProgress').textContent = summary;
 }
 
@@ -2028,9 +2025,9 @@ function showChallengeLockedNotice(completedByPass) {
     feedback.style.display = 'block';
     feedback.className = 'challenge-feedback locked';
     if (completedByPass) {
-        feedback.innerHTML = '🔒 <strong>Challenge complete.</strong> The official solution is shown for reference. Editor is locked.';
+        feedback.innerHTML = '?? <strong>Challenge complete.</strong> The official solution is shown for reference. Editor is locked.';
     } else {
-        feedback.innerHTML = '👁 <strong>Solution viewed — challenge attended (no XP).</strong> The official solution is shown for reference. Editor is locked and this challenge cannot be retried.';
+        feedback.innerHTML = '?? <strong>Solution viewed � challenge attended (no XP).</strong> The official solution is shown for reference. Editor is locked and this challenge cannot be retried.';
     }
 }
 
@@ -2052,13 +2049,13 @@ async function runAndSubmitChallenge() {
         await pyodide.runPythonAsync(code);
         outputText.textContent = output || '(no output)';
     } catch (error) {
-        outputText.textContent = '❌ Error:\n' + error.message;
+        outputText.textContent = '? Error:\n' + error.message;
     }
     
     // Now evaluate with AI
     feedback.style.display = 'block';
     feedback.className = 'challenge-feedback';
-    feedback.innerHTML = '<span class="typing-dots"><span>●</span><span>●</span><span>●</span></span> AI is evaluating...';
+    feedback.innerHTML = '<span class="typing-dots"><span>?</span><span>?</span><span>?</span></span> AI is evaluating...';
     
     const evalPrompt = `You are evaluating a beginner Python student's code.
 
@@ -2075,10 +2072,10 @@ OUTPUT: ${outputText.textContent}
 
 Be very encouraging. Respond:
 VERDICT: PASS or NEEDS_WORK
-✓ What's correct
-✗ What's missing (only if NEEDS_WORK)
-💡 One tip
-🎉 Encouragement`;
+? What's correct
+? What's missing (only if NEEDS_WORK)
+?? One tip
+?? Encouragement`;
 
     // Pass a callback so we can mark the challenge complete the moment AI says PASS,
     // instead of racing against a setTimeout.
@@ -2094,7 +2091,7 @@ function markChallengeComplete(challengeId) {
     completed.push(challengeId);
     localStorage.setItem('completedChallenges', JSON.stringify(completed));
     addXP(30, 'Challenge completed');
-    showToast('🏆 Challenge completed! +30 XP');
+    showToast('?? Challenge completed! +30 XP');
 
     const progressLabel = document.getElementById('challengeProgress');
     if (progressLabel) progressLabel.textContent = completed.length + '/' + CHALLENGES.length + ' completed';
@@ -2117,10 +2114,10 @@ function showChallengeHint() {
     feedback.className = 'challenge-feedback';
     
     if (challengeHintIndex < currentChallenge.hints.length) {
-        feedback.innerHTML = '💡 <strong>Hint ' + (challengeHintIndex + 1) + ':</strong> ' + currentChallenge.hints[challengeHintIndex];
+        feedback.innerHTML = '?? <strong>Hint ' + (challengeHintIndex + 1) + ':</strong> ' + currentChallenge.hints[challengeHintIndex];
         challengeHintIndex++;
     } else {
-        feedback.innerHTML = '💡 No more hints available. Try the solution button!';
+        feedback.innerHTML = '?? No more hints available. Try the solution button!';
     }
 }
 
@@ -2131,7 +2128,7 @@ function showChallengeSolution() {
     const isAlreadyCompleted = completed.includes(currentChallenge.id);
     const feedback = document.getElementById('challengeFeedback');
 
-    // Confirm before revealing — viewing the solution permanently locks the editor.
+    // Confirm before revealing � viewing the solution permanently locks the editor.
     let confirmMsg;
     if (isAlreadyCompleted) {
         confirmMsg = 'You\u2019ve already completed this challenge. Viewing the official solution will lock the editor for reference.\n\nProceed?';
@@ -2166,10 +2163,10 @@ function showChallengeSolution() {
     feedback.className = 'challenge-feedback locked';
 
     if (isAlreadyCompleted) {
-        feedback.innerHTML = '👁 <strong>Official solution shown above.</strong> Editor is locked.';
+        feedback.innerHTML = '?? <strong>Official solution shown above.</strong> Editor is locked.';
     } else {
-        feedback.innerHTML = '👁 <strong>Solution shown — challenge attended (no XP awarded).</strong> Editor is locked. This challenge cannot be retried.';
-        showToast('👁 Challenge attended — no XP earned');
+        feedback.innerHTML = '?? <strong>Solution shown � challenge attended (no XP awarded).</strong> Editor is locked. This challenge cannot be retried.';
+        showToast('?? Challenge attended � no XP earned');
     }
 
     // Refresh challenge list summary so the badge shows up
@@ -2179,7 +2176,7 @@ function showChallengeSolution() {
         const completedCount = completed.length;
         const attendedOnly = viewed.filter(id => !completed.includes(id)).length;
         progressLabel.textContent = completedCount + '/' + total + ' completed' +
-            (attendedOnly > 0 ? ' • ' + attendedOnly + ' attended' : '');
+            (attendedOnly > 0 ? ' � ' + attendedOnly + ' attended' : '');
     }
 }
 
@@ -2215,7 +2212,7 @@ function closeLeaderboard() {
 }
 
 function renderLeaderboard() {
-    document.getElementById('leaderboardList').innerHTML = '<div class="leaderboard-loading">Loading…</div>';
+    document.getElementById('leaderboardList').innerHTML = '<div class="leaderboard-loading">Loading�</div>';
     document.getElementById('leaderboardFooter').textContent = '';
 }
 
@@ -2224,7 +2221,7 @@ function renderLeaderboardList(users) {
     const footer = document.getElementById('leaderboardFooter');
 
     if (!users || users.length === 0) {
-        list.innerHTML = '<div class="leaderboard-empty">No participants yet — be the first!</div>';
+        list.innerHTML = '<div class="leaderboard-empty">No participants yet � be the first!</div>';
         return;
     }
 
@@ -2235,14 +2232,14 @@ function renderLeaderboardList(users) {
     courseUsers.forEach((u, i) => {
         const rank = i + 1;
         const isMe = currentUser && u.uid === currentUser.uid;
-        const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '#' + rank;
+        const medal = rank === 1 ? '??' : rank === 2 ? '??' : rank === 3 ? '??' : '#' + rank;
         const name = (u.displayName || 'Anonymous').replace(/[<>]/g, '');
         html += `<div class="leaderboard-row${isMe ? ' me' : ''}">
             <span class="lb-rank">${medal}</span>
             <span class="lb-name">${name}${isMe ? ' <em>(you)</em>' : ''}</span>
             <span class="lb-level">Lv.${u.level || 1}</span>
             <span class="lb-xp">${u.xp || 0} XP</span>
-            <span class="lb-badges">🏅 ${(u.badges || []).length}</span>
+            <span class="lb-badges">?? ${(u.badges || []).length}</span>
         </div>`;
     });
 
@@ -2268,9 +2265,9 @@ async function resetMyProgress() {
     const ok = confirm(
         `Reset all your progress for ${courseId}?\n\n` +
         `This will:\n` +
-        `  • Clear cached XP, badges, completed sections and challenges (this device)\n` +
-        `  • Zero your progress on the cloud (all your devices)\n` +
-        `  • Keep your sign-in account and your work on OTHER courses intact\n\n` +
+        `  � Clear cached XP, badges, completed sections and challenges (this device)\n` +
+        `  � Zero your progress on the cloud (all your devices)\n` +
+        `  � Keep your sign-in account and your work on OTHER courses intact\n\n` +
         `This cannot be undone. Continue?`
     );
     if (!ok) return;
@@ -2300,7 +2297,7 @@ async function resetMyProgress() {
             await window.fbHelpers.resetUserProgress(currentUser.uid, window.fbHelpers.COURSE_ID);
         } catch (e) {
             console.warn('Cloud reset failed:', e);
-            alert('Cloud reset failed — your local cache is cleared, but please tell your instructor if your XP keeps showing the old value.');
+            alert('Cloud reset failed � your local cache is cleared, but please tell your instructor if your XP keeps showing the old value.');
         }
     }
 
@@ -2314,13 +2311,13 @@ function toggleStudentFullscreen() {
     const btn = document.querySelector('.fullscreen-btn');
     if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen().then(() => {
-            if (btn) btn.innerHTML = '⛶ Exit';
+            if (btn) btn.innerHTML = '? Exit';
         }).catch((err) => {
             console.warn('Fullscreen request failed:', err);
         });
     } else {
         document.exitFullscreen().then(() => {
-            if (btn) btn.innerHTML = '⛶ Fullscreen';
+            if (btn) btn.innerHTML = '? Fullscreen';
         }).catch(() => {});
     }
 }
@@ -2329,7 +2326,7 @@ function toggleStudentFullscreen() {
 document.addEventListener('fullscreenchange', () => {
     const btn = document.querySelector('.fullscreen-btn');
     if (!btn) return;
-    btn.innerHTML = document.fullscreenElement ? '⛶ Exit' : '⛶ Fullscreen';
+    btn.innerHTML = document.fullscreenElement ? '? Exit' : '? Fullscreen';
 });
 
 // ===== Keyboard Navigation =====
@@ -2379,19 +2376,19 @@ function renderLockedSection() {
     }
     card.style.display = 'block';
     card.innerHTML = `
-        <div class="locked-card-icon">🔒</div>
+        <div class="locked-card-icon">??</div>
         <div class="locked-card-title">${escapeHtml(module.title)} is part of the paid course</div>
         <p class="locked-card-text">
-            Modules 1–${PREVIEW_MODULE_LIMIT} are free for everyone. To unlock the rest — including
-            the AI Lab Mentor for advanced modules, hands-on challenges, and the live leaderboard —
+            Modules 1�${PREVIEW_MODULE_LIMIT} are free for everyone. To unlock the rest � including
+            the AI Lab Mentor for advanced modules, hands-on challenges, and the live leaderboard �
             enrol on PowerShell Academy.
         </p>
         <div class="locked-card-actions">
-            <a href="${ENROLL_URL}" target="_blank" class="locked-card-cta">🚀 Enrol on PowerShell Academy</a>
-            <button class="locked-card-secondary" onclick="goToFirstUnlockedModule()">↩ Back to free modules</button>
+            <a href="${ENROLL_URL}" target="_blank" class="locked-card-cta">?? Enrol on PowerShell Academy</a>
+            <button class="locked-card-secondary" onclick="goToFirstUnlockedModule()">? Back to free modules</button>
         </div>
         <p class="locked-card-tip">
-            ⚠️ <strong>Important:</strong> when you enrol, use the
+            ?? <strong>Important:</strong> when you enrol, use the
             <strong>same email</strong> you signed in with here (<code>${escapeHtml((currentUser && currentUser.email) || 'your-email@example.com')}</code>).
             That's how the lab automatically unlocks for you.
             <br><br>
@@ -2407,7 +2404,7 @@ function renderLockedSection() {
     if (toggleBtn) toggleBtn.classList.remove('has-code');
 
     const breadcrumb = document.getElementById('breadcrumb');
-    if (breadcrumb) breadcrumb.textContent = module.title + ' > 🔒 Locked';
+    if (breadcrumb) breadcrumb.textContent = module.title + ' > ?? Locked';
     const totalInModule = module.sections.length;
     const indicator = document.getElementById('sectionIndicator');
     if (indicator) indicator.textContent = (currentSection + 1) + ' / ' + totalInModule;
@@ -2424,18 +2421,18 @@ async function recheckEntitlement() {
         showToast('Sign in to refresh your access.');
         return;
     }
-    showToast('Checking access…');
+    showToast('Checking access�');
     try {
         await claimPendingViaWorker(currentUser.uid, currentUser.email || "");
         currentEntitlement = await window.fbHelpers.loadEntitlement(currentUser.uid);
         if (hasFullAccess()) {
-            showToast('🔓 Access granted!');
+            showToast('?? Access granted!');
             renderSection();
         } else {
             showToast('No active entitlement found yet. Try again in a moment.');
         }
     } catch (e) {
-        showToast('Could not check access — please refresh the page.');
+        showToast('Could not check access � please refresh the page.');
     }
 }
 
